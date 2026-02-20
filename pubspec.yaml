@@ -1,0 +1,44 @@
+name: finlife
+description: "A smart finance application for managing income, expenses, budgets, and financial goals."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.2
+  riverpod: ^2.0.0
+  flutter_riverpod: ^2.0.0
+  riverpod_annotation: ^2.0.0
+  drift: ^2.0.0
+  sqlite3_flutter_libs: ^0.5.0
+  path: ^1.8.0
+  path_provider: ^2.0.0
+  fl_chart: ^0.69.0
+  local_auth: ^2.0.0
+  json_annotation: ^4.8.0
+  intl: ^0.18.0
+  shared_preferences: ^2.0.0
+  flutter_svg: ^2.0.0
+  http: ^0.13.0
+  freezed_annotation: ^2.0.0
+  flutter_image_compress: ^2.4.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+  build_runner: ^2.0.0
+  freezed: ^2.0.0
+  riverpod_generator: ^2.0.0
+  drift_dev: ^2.0.0
+  json_serializable: ^6.7.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+    - assets/icons/
