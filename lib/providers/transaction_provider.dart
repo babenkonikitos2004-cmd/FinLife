@@ -3,6 +3,7 @@ import 'package:finlife/database/database.dart' as db;
 import 'package:finlife/models/transaction.dart' as model;
 import 'package:finlife/providers/database_provider.dart';
 import 'package:finlife/providers/user_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 // Conversion functions between database and model Transaction types
 model.TransactionType _stringToTransactionType(String type) {
   switch (type) {
@@ -87,20 +88,20 @@ class TransactionNotifier extends StateNotifier<TransactionState> {
   Future<void> addTransaction(model.Transaction transaction) async {
     try {
       final database = ref.read(databaseProvider);
-      // Get current user ID
       final userState = ref.read(userProvider);
-      final userId = userState.user?.id;
+      final prefs = await SharedPreferences.getInstance();
+      final savedUserId = prefs.getString('user_id');
+      final userId = userState.user?.id ?? savedUserId ?? 'user_1';
       print('DEBUG: User ID in addTransaction: $userId');
-      if (userId == null) {
-        throw Exception('User not found');
-      }
-      
+
       final dbTransaction = _modelToDbTransaction(transaction, userId);
       await database.insertTransaction(dbTransaction);
       print('DEBUG: Transaction inserted into database');
-      
-      // Reload transactions to ensure consistency
-      await loadTransactions(userId);
+
+      // Just add to state directly, no reload
+      final updated = [...state.transactions, transaction];
+      state = state.copyWith(transactions: updated);
+      print('DEBUG: State updated with new transaction');
     } catch (e) {
       print('Error adding transaction: $e');
       rethrow;
@@ -112,18 +113,23 @@ class TransactionNotifier extends StateNotifier<TransactionState> {
       final database = ref.read(databaseProvider);
       // Get current user ID
       final userState = ref.read(userProvider);
-      final userId = userState.user?.id;
+      final prefs = await SharedPreferences.getInstance();
+      final savedUserId = prefs.getString('user_id');
+      final userId = userState.user?.id ?? savedUserId ?? 'user_1';
       print('DEBUG: User ID in updateTransaction: $userId');
-      if (userId == null) {
-        throw Exception('User not found');
-      }
       
       final dbTransaction = _modelToDbTransaction(transaction, userId);
       await database.updateTransaction(dbTransaction);
       print('DEBUG: Transaction updated in database');
       
-      // Reload transactions to ensure consistency
-      await loadTransactions(userId);
+      // Update state directly instead of reloading all transactions
+      final updatedTransaction = _dbToModelTransaction(dbTransaction);
+      final updatedTransactions = [...state.transactions];
+      final index = updatedTransactions.indexWhere((t) => t.id == transaction.id);
+      if (index != -1) {
+        updatedTransactions[index] = updatedTransaction;
+        state = state.copyWith(transactions: updatedTransactions);
+      }
     } catch (e) {
       print('Error updating transaction: $e');
       rethrow;

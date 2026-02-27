@@ -235,7 +235,6 @@ class _GoalsScreenState extends ConsumerState<GoalsScreen> {
                 ElevatedButton(
                   onPressed: () {
                     _saveGoal();
-                    Navigator.of(context).pop();
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
@@ -292,19 +291,41 @@ class _GoalsScreenState extends ConsumerState<GoalsScreen> {
 
   void _saveGoal() {
     final userState = ref.read(userProvider);
-    if (userState.user == null || _selectedDate == null) return;
+    final userId = userState.user?.id ?? 'user_1';
+    if (_selectedDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Выберите дату')),
+      );
+      return;
+    }
 
     final title = _titleController.text.trim();
-    if (title.isEmpty) return;
+    if (title.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Введите название цели')),
+      );
+      return;
+    }
 
     final targetAmountText = _targetAmountController.text.trim();
-    if (targetAmountText.isEmpty) return;
+    if (targetAmountText.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Введите сумму цели')),
+      );
+      return;
+    }
 
-    final targetAmount = double.tryParse(targetAmountText.replaceAll(',', '.')) ?? 0.0;
+    final targetAmount = double.tryParse(targetAmountText.replaceAll(',', '.'));
+    if (targetAmount == null || targetAmount <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Введите корректную сумму цели')),
+      );
+      return;
+    }
 
     final newGoal = db.FinancialGoal(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
-      userId: userState.user!.id,
+      userId: userId,
       title: '$_selectedEmoji $title',
       description: '',
       targetAmount: targetAmount,
@@ -314,6 +335,17 @@ class _GoalsScreenState extends ConsumerState<GoalsScreen> {
     );
 
     ref.read(goalProvider.notifier).addGoal(newGoal);
+    
+    // Close the dialog after saving
+    Navigator.of(context).pop();
+    
+    // Show success message
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Цель добавлена!'),
+        backgroundColor: Colors.green,
+      ),
+    );
   }
 
   void _addContribution() {

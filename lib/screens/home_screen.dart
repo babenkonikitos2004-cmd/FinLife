@@ -4,11 +4,15 @@ import 'package:finlife/models/transaction.dart';
 import 'package:finlife/screens/statistics_screen.dart';
 import 'package:finlife/screens/goals_screen.dart';
 import 'package:finlife/screens/profile_screen.dart';
+import 'package:finlife/screens/ai_advice_screen.dart';
 import 'package:finlife/providers/transaction_provider.dart';
 import 'package:finlife/providers/user_provider.dart';
+import 'package:finlife/providers/goal_provider.dart';
 import 'package:finlife/widgets/transaction_modal.dart';
 import 'package:finlife/utils/category_utils.dart';
+import 'package:finlife/services/storage_service.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -26,18 +30,41 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     super.initState();
     // Load user and transactions when the screen is initialized
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final userState = ref.read(userProvider);
-      print('DEBUG: HomeScreen userState - user is null: ${userState.user == null}');
-      if (userState.user != null) {
-        print('DEBUG: Loading transactions for user: ${userState.user!.id}');
-        // Use Future.microtask to avoid modifying provider during build
-        Future.microtask(() {
-          ref.read(transactionProvider.notifier).loadTransactions(userState.user!.id);
-        });
+      _loadUserAndTransactions();
+    });
+    
+    // Listen for user changes and load transactions when user becomes available
+    ref.listenManual(userProvider, (prev, next) async {
+      if (next.user != null && prev?.user == null) {
+        ref.read(transactionProvider.notifier).loadTransactions(next.user!.id);
       } else {
-        print('DEBUG: No user found, cannot load transactions');
+        // Try to load transactions with saved user ID from SharedPreferences
+        final prefs = await SharedPreferences.getInstance();
+        final userId = prefs.getString('user_id') ?? 'user_1';
+        ref.read(transactionProvider.notifier).loadTransactions(userId);
       }
     });
+  }
+  
+  Future<void> _loadUserAndTransactions() async {
+    final user = await StorageService().getUser();
+    
+    if (user != null) {
+      // Update user provider with the loaded user
+      ref.read(userProvider.notifier).state =
+        UserState(user: user, isLoading: false);
+      
+      print('DEBUG: Loading transactions for user: ${user.id}');
+      // Load transactions for the user
+      ref.read(transactionProvider.notifier).loadTransactions(user.id);
+    } else {
+      print('DEBUG: No user found, cannot load transactions');
+      // Try to load transactions with saved user ID from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('user_id') ?? 'user_1';
+      print('DEBUG: Loading transactions for saved user ID: $userId');
+      ref.read(transactionProvider.notifier).loadTransactions(userId);
+    }
   }
   
   @override
@@ -49,6 +76,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       // Use Future.microtask to avoid modifying provider during build
       Future.microtask(() {
         ref.read(transactionProvider.notifier).loadTransactions(userState.user!.id);
+      });
+    } else {
+      // Try to load transactions with saved user ID from SharedPreferences
+      Future.microtask(() async {
+        final prefs = await SharedPreferences.getInstance();
+        final userId = prefs.getString('user_id') ?? 'user_1';
+        print('DEBUG: Loading transactions for saved user ID in didChangeDependencies: $userId');
+        ref.read(transactionProvider.notifier).loadTransactions(userId);
       });
     }
   }
@@ -63,11 +98,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   double _calculateTotalBalance(List<Transaction> transactions) {
-    return transactions.fold(0.0, (sum, transaction) {
-      return sum + (transaction.type == TransactionType.income
-          ? transaction.amount
-          : -transaction.amount);
-    });
+    // Now that expenses are stored as negative numbers, we can simply sum all amounts
+    return transactions.fold(0.0, (sum, transaction) => sum + transaction.amount);
   }
 
   double _calculateIncomeForMonth(List<Transaction> transactions, DateTime month) {
@@ -91,20 +123,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   double _calculateBalanceForMonth(List<Transaction> transactions, DateTime month) {
     final income = _calculateIncomeForMonth(transactions, month);
     final expenses = _calculateExpensesForMonth(transactions, month);
-    return income - expenses;
+    return income + expenses; // Expenses are already negative, so we add them
   }
 
   double _calculateSavingsPercentage(List<Transaction> transactions, DateTime month) {
     final income = _calculateIncomeForMonth(transactions, month);
     final expenses = _calculateExpensesForMonth(transactions, month);
     if (income == 0) return 0;
-    return ((income - expenses) / income * 100).clamp(0, 100);
+    return ((income + expenses) / income * 100).clamp(0, 100); // Expenses are already negative
   }
 
   double _calculateAveragePerDay(List<Transaction> transactions, DateTime month) {
-    final balance = _calculateBalanceForMonth(transactions, month);
+    final expenses = _calculateExpensesForMonth(transactions, month);
     final daysInMonth = DateTime(month.year, month.month + 1, 0).day;
-    return balance / daysInMonth;
+    return expenses / daysInMonth;
   }
 
   double _calculateSubscriptions(List<Transaction> transactions, DateTime month) {
@@ -112,17 +144,131 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     return 2840.0;
   }
 
+  // Helper function to calculate highest overspending category
+  Map<String, dynamic>? _calculateHighestOverspendingCategory(List<Transaction> transactions, DateTime month) {
+    // Calculate expenses by category for current month
+    final currentMonthExpensesByCategory = <String, double>{};
+    final currentMonthStart = DateTime(month.year, month.month, 1);
+    final nextMonthStart = DateTime(month.year, month.month + 1, 1);
+    
+    for (var transaction in transactions) {
+      if (transaction.type == TransactionType.expense &&
+          transaction.date.isAfter(currentMonthStart.subtract(const Duration(days: 1))) &&
+          transaction.date.isBefore(nextMonthStart)) {
+        final categoryId = transaction.categoryId;
+        if (currentMonthExpensesByCategory.containsKey(categoryId)) {
+          currentMonthExpensesByCategory[categoryId] =
+              currentMonthExpensesByCategory[categoryId]! + transaction.amount;
+        } else {
+          currentMonthExpensesByCategory[categoryId] = transaction.amount;
+        }
+      }
+    }
+    
+    // Calculate budget limits by category (using 1/3 of income as a simple rule)
+    final income = _calculateIncomeForMonth(transactions, month);
+    final budgetLimitPerCategory = income / 3; // Simple rule: no more than 1/3 of income per category
+    
+    // Find category with highest overspending
+    String? highestOverspendingCategory;
+    double highestOverspendingAmount = 0;
+    
+    currentMonthExpensesByCategory.forEach((categoryId, amount) {
+      final overspending = amount.abs() - budgetLimitPerCategory;
+      if (overspending > highestOverspendingAmount) {
+        highestOverspendingAmount = overspending;
+        highestOverspendingCategory = categoryId;
+      }
+    });
+    
+    if (highestOverspendingCategory != null) {
+      return {
+        'category': highestOverspendingCategory,
+        'amount': highestOverspendingAmount,
+      };
+    }
+    
+    return null;
+  }
+
+  // Helper function to determine balance status
+  String _getBalanceStatusMessage(double balance, double income) {
+    if (balance > 0) {
+      return 'Отличный месяц! Вы сохранили ${NumberFormat('#,###', 'ru').format(balance.abs())} ₽ 🎉';
+    } else if (income > 0 && (balance.abs() / income) < 0.1) {
+      return 'Вы почти не откладываете деньги 😟';
+    } else {
+      return '';
+    }
+  }
+
+  // Helper function to get category icon with colored circle
+  Widget _getCategoryIcon(String categoryId) {
+    final categoryInfo = CategoryUtils.getCategoryInfo(categoryId);
+    
+    // Map category names to specific colors as requested
+    final categoryColors = {
+      'food': const Color(0xFFFF9800), // orange
+      'Еда': const Color(0xFFFF9800), // orange
+      'transport': const Color(0xFF2196F3), // blue
+      'Транспорт': const Color(0xFF2196F3), // blue
+      'health': const Color(0xFFF44336), // red
+      'Здоровье': const Color(0xFFF44336), // red
+      'entertainment': const Color(0xFF9C27B0), // purple
+      'Развлечения': const Color(0xFF9C27B0), // purple
+      'clothing': const Color(0xFFE91E63), // pink
+      'Одежда': const Color(0xFFE91E63), // pink
+      'salary': const Color(0xFF4CAF50), // green
+      'Зарплата': const Color(0xFF4CAF50), // green
+      'investments': const Color(0xFF009688), // teal
+      'Инвестиции': const Color(0xFF009688), // teal
+      'gifts': const Color(0xFFFFEB3B), // yellow
+      'Подарки': const Color(0xFFFFEB3B), // yellow
+      'cafe': const Color(0xFF795548), // brown
+      'Кафе': const Color(0xFF795548), // brown
+      'other': const Color(0xFF9E9E9E), // grey
+      'Другое': const Color(0xFF9E9E9E), // grey
+      'freelance': const Color(0xFF607D8B), // blue grey
+      'Фриланс': const Color(0xFF607D8B), // blue grey
+    };
+    
+    final color = categoryColors[categoryId] ?? categoryInfo.color;
+    
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Center(
+        child: Text(
+          categoryInfo.emoji,
+          style: const TextStyle(
+            fontSize: 20,
+          ),
+        ),
+      ),
+    );
+  }
+
   void _onItemTapped(int index) {
     if (index == 2) {
       // Handle FAB button tap
       _showAddTransactionDialog();
-    } else if (index == 4) {
-      // Navigate to History screen
-      Navigator.pushNamed(context, '/history');
     } else {
       setState(() {
         _selectedIndex = index > 2 ? index - 1 : index;
       });
+      
+      // Navigate to respective screens
+      if (index == 4) {
+        Navigator.pushNamed(context, '/history');
+      } else if (index == 1) {
+        Navigator.pushNamed(context, '/statistics');
+      } else if (index == 3) {
+        Navigator.pushNamed(context, '/goals');
+      }
     }
   }
 
@@ -170,6 +316,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 _buildBalanceCard(monthBalance, income, expenses, savingsPercentage),
                 const SizedBox(height: 20),
                 _buildAIAdviceCard(),
+                _buildGoalsProgressSection(),
                 const SizedBox(height: 20),
                 _buildQuickActionsRow(),
                 const SizedBox(height: 20),
@@ -203,7 +350,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
           ),
           Text(
-            '${NumberFormat('#,##0.00', 'ru_RU').format(totalBalance)} ₽',
+            '${NumberFormat('#,###', 'ru').format(totalBalance)} ₽',
             style: const TextStyle(
               color: Colors.black87,
               fontSize: 24,
@@ -294,7 +441,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            '${balance > 0 ? '+' : ''}${NumberFormat('#,##0', 'ru_RU').format(balance)} ₽',
+            '${balance > 0 ? '+' : ''}${NumberFormat('#,###', 'ru').format(balance)} ₽',
             style: TextStyle(
               fontSize: 32,
               fontWeight: FontWeight.bold,
@@ -327,7 +474,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      '${NumberFormat('#,##0', 'ru_RU').format(income)} ₽',
+                      '${NumberFormat('#,###', 'ru').format(income)} ₽',
                       style: const TextStyle(
                         color: Color(0xFF4CAF50),
                         fontWeight: FontWeight.w600,
@@ -352,7 +499,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      '${NumberFormat('#,##0', 'ru_RU').format(expenses)} ₽',
+                      '${NumberFormat('#,###', 'ru').format(expenses)} ₽',
                       style: const TextStyle(
                         color: Colors.red,
                         fontWeight: FontWeight.w600,
@@ -395,6 +542,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Widget _buildAIAdviceCard() {
+    // Get transactions from state
+    final transactionState = ref.watch(transactionProvider);
+    final transactions = transactionState.transactions;
+    
+    // Calculate advice data
+    final highestOverspending = _calculateHighestOverspendingCategory(transactions, _currentMonth);
+    final savingsPercentage = _calculateSavingsPercentage(transactions, _currentMonth);
+    final monthBalance = _calculateBalanceForMonth(transactions, _currentMonth);
+    final income = _calculateIncomeForMonth(transactions, _currentMonth);
+    final balanceStatusMessage = _getBalanceStatusMessage(monthBalance, income);
+    
+    // Determine which message to show
+    String adviceMessage = '';
+    if (highestOverspending != null) {
+      final categoryInfo = CategoryUtils.getCategoryInfo(highestOverspending['category']);
+      adviceMessage = 'Вы тратите много на ${categoryInfo.name}. Сэкономьте до ${NumberFormat('#,###', 'ru').format(highestOverspending['amount'].abs())} ₽';
+    } else if (balanceStatusMessage.isNotEmpty) {
+      adviceMessage = balanceStatusMessage;
+    } else {
+      // Default message if no specific advice
+      adviceMessage = 'Хорошо управляете финансами! Продолжайте в том же духе.';
+    }
+    
     return Container(
       width: double.infinity,
       decoration: const BoxDecoration(
@@ -421,25 +591,211 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          const Text(
-            'Вы потратили на 12% больше на продукты в этом месяце. Рекомендуем проверить чеки и найти скидки.',
-            style: TextStyle(
+          Text(
+            adviceMessage,
+            style: const TextStyle(
               color: Colors.white,
               fontSize: 14,
               height: 1.4,
             ),
           ),
           const SizedBox(height: 12),
-          const Text(
-            'Подробнее →',
-            style: TextStyle(
-              color: Color(0xFF7B61FF),
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
+          GestureDetector(
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const AIAdviceScreen(),
+                ),
+              );
+            },
+            child: const Text(
+              'Подробнее →',
+              style: TextStyle(
+                color: Color(0xFF7B61FF),
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildGoalsProgressSection() {
+    final goalState = ref.watch(goalProvider);
+    final userState = ref.watch(userProvider);
+    
+    // Filter goals where currentAmount < targetAmount
+    final activeGoals = goalState.goals.where((goal) => goal.currentAmount < goal.targetAmount).toList();
+    
+    // Hide section if no active goals
+    if (activeGoals.isEmpty) {
+      return Container();
+    }
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 20),
+        SizedBox(
+          height: 180,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            itemCount: activeGoals.length + 1, // +1 for the "Все цели" button
+            itemBuilder: (context, index) {
+              // Last item is the "Все цели" button
+              if (index == activeGoals.length) {
+                return Container(
+                  width: 150,
+                  margin: const EdgeInsets.only(right: 16),
+                  child: Card(
+                    color: const Color(0xFF7B61FF),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: InkWell(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const GoalsScreen(),
+                          ),
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(16),
+                      child: const Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.arrow_forward,
+                              color: Colors.white,
+                              size: 32,
+                            ),
+                            SizedBox(height: 8),
+                            Text(
+                              'Все цели',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }
+              
+              final goal = activeGoals[index];
+              final progress = (goal.targetAmount > 0 ? goal.currentAmount / goal.targetAmount : 0).clamp(0.0, 1.0);
+              final remaining = goal.targetAmount - goal.currentAmount;
+              
+              // Extract emoji and title
+              String emoji = '🎯';
+              String title = goal.title;
+              if (goal.title.length >= 2 && goal.title.codeUnitAt(0) >= 0xD800) {
+                // Handle emoji (assuming it's at the beginning)
+                final parts = goal.title.split(' ');
+                if (parts.isNotEmpty) {
+                  emoji = parts[0];
+                  title = parts.skip(1).join(' ');
+                }
+              } else if (goal.title.length >= 2 && goal.title.substring(0, 2) == '🎯') {
+                emoji = '🎯';
+                title = goal.title.substring(2).trim();
+              } else if (goal.title.length >= 1 && 
+                  (goal.title.codeUnitAt(0) >= 0x1F300 && goal.title.codeUnitAt(0) <= 0x1F9FF)) {
+                emoji = goal.title.substring(0, 1);
+                title = goal.title.substring(1).trim();
+              } else {
+                title = goal.title;
+              }
+              
+              // Motivational text based on progress
+              String motivationalText;
+              if (progress >= 0.9) {
+                motivationalText = 'Почти достигли!';
+              } else if (progress >= 0.7) {
+                motivationalText = 'Хороший прогресс!';
+              } else if (progress >= 0.5) {
+                motivationalText = 'Половина пути пройдена!';
+              } else if (progress >= 0.3) {
+                motivationalText = 'Продолжайте в том же духе!';
+              } else {
+                motivationalText = 'Начинаем путь к цели!';
+              }
+              
+              return Container(
+                width: 280,
+                margin: const EdgeInsets.only(right: 16),
+                child: Card(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              emoji,
+                              style: const TextStyle(fontSize: 24),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                title,
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: LinearProgressIndicator(
+                            value: progress.toDouble(),
+                            backgroundColor: Colors.grey[200],
+                            valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF7B61FF)),
+                            minHeight: 8,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          motivationalText,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '${NumberFormat('#,###', 'ru').format(remaining)} ₽ осталось накопить',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
@@ -530,13 +886,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         const SizedBox(height: 16),
         Row(
           children: [
-            _buildStatCard('СР. В ДЕНЬ', '${NumberFormat('#,##0', 'ru_RU').format(avgPerDay)}₽', '+8% vs янв'),
+            _buildStatCard('СР. В ДЕНЬ', '${NumberFormat('#,###', 'ru').format(avgPerDay)}₽', '+8% vs янв'),
             const SizedBox(width: 12),
-            _buildStatCard('НАКОПЛЕНО', '${NumberFormat('#,##0', 'ru_RU').format(saved)}₽', '+24% vs янв'),
+            _buildStatCard('НАКОПЛЕНО', '${NumberFormat('#,###', 'ru').format(saved)}₽', '+24% vs янв'),
           ],
         ),
         const SizedBox(height: 12),
-        _buildStatCard('ПОДПИСКИ', '${NumberFormat('#,##0', 'ru_RU').format(subscriptions)}₽', '= как всегда'),
+        _buildStatCard('ПОДПИСКИ', '${NumberFormat('#,###', 'ru').format(subscriptions)}₽', '= как всегда'),
       ],
     );
   }
@@ -666,8 +1022,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Widget _buildTransactionItem(Transaction transaction) {
-    final categoryInfo = CategoryUtils.getCategoryInfo(transaction.categoryId);
-    
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
@@ -684,29 +1038,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
       child: Row(
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: categoryInfo.color.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Center(
-              child: Text(
-                categoryInfo.emoji,
-                style: const TextStyle(
-                  fontSize: 20,
-                ),
-              ),
-            ),
-          ),
+          _getCategoryIcon(transaction.categoryId),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  categoryInfo.name,
+                  CategoryUtils.getCategoryInfo(transaction.categoryId).name,
                   style: const TextStyle(
                     fontWeight: FontWeight.w500,
                   ),
@@ -722,10 +1061,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
           ),
           Text(
-            '${transaction.type == TransactionType.expense ? '-' : '+'}${transaction.amount.toStringAsFixed(2)} ₽',
+            '${NumberFormat('#,###', 'ru').format(transaction.amount.abs())} ₽',
             style: TextStyle(
               fontWeight: FontWeight.w600,
-              color: transaction.type == TransactionType.income
+              color: transaction.amount >= 0
                   ? Colors.green
                   : Colors.red,
             ),

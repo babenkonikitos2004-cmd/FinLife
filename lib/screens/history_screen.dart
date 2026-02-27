@@ -30,24 +30,27 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
 
   List<Transaction> _filterTransactions(List<Transaction> transactions) {
     // Apply search filter
-    List<Transaction> filtered = transactions;
+    List<Transaction> filtered = List.from(transactions);
     if (_searchQuery.isNotEmpty) {
-      filtered = filtered.where((t) => 
+      filtered = filtered.where((t) =>
         t.title.toLowerCase().contains(_searchQuery.toLowerCase())
       ).toList();
     }
-
+    
     // Apply type filter
     if (_filter == 'Доходы') {
       filtered = filtered.where((t) => t.type == TransactionType.income).toList();
     } else if (_filter == 'Расходы') {
       filtered = filtered.where((t) => t.type == TransactionType.expense).toList();
     }
-
+    
+    // Create a new list for sorting to avoid unmodifiable list error
+    List<Transaction> sorted = List.from(filtered);
+    
     // Sort by date (newest first)
-    filtered.sort((a, b) => b.date.compareTo(a.date));
-
-    return filtered;
+    sorted.sort((a, b) => b.date.compareTo(a.date));
+    
+    return sorted;
   }
 
   @override
@@ -112,7 +115,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                     selected: _filter == 'Все',
                     onSelected: (selected) {
                       setState(() {
-                        _filter = selected ? 'Все' : '';
+                        _filter = selected ? 'Все' : 'Все';
                       });
                     },
                   ),
@@ -122,7 +125,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                     selected: _filter == 'Доходы',
                     onSelected: (selected) {
                       setState(() {
-                        _filter = selected ? 'Доходы' : '';
+                        _filter = selected ? 'Доходы' : 'Все';
                       });
                     },
                     backgroundColor: Colors.green.withOpacity(0.1),
@@ -134,7 +137,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                     selected: _filter == 'Расходы',
                     onSelected: (selected) {
                       setState(() {
-                        _filter = selected ? 'Расходы' : '';
+                        _filter = selected ? 'Расходы' : 'Все';
                       });
                     },
                     backgroundColor: Colors.red.withOpacity(0.1),
@@ -220,29 +223,62 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     return grouped;
   }
 
-  Widget _buildTransactionItem(Transaction transaction, Category category) {
-    final categoryInfo = CategoryUtils.getCategoryInfo(category.name);
+  // Helper function to get category icon with colored circle
+  Widget _getCategoryIcon(String categoryId) {
+    final categoryInfo = CategoryUtils.getCategoryInfo(categoryId);
     
+    // Map category names to specific colors as requested
+    final categoryColors = {
+      'food': const Color(0xFFFF9800), // orange
+      'Еда': const Color(0xFFFF9800), // orange
+      'transport': const Color(0xFF2196F3), // blue
+      'Транспорт': const Color(0xFF2196F3), // blue
+      'health': const Color(0xFFF44336), // red
+      'Здоровье': const Color(0xFFF44336), // red
+      'entertainment': const Color(0xFF9C27B0), // purple
+      'Развлечения': const Color(0xFF9C27B0), // purple
+      'clothing': const Color(0xFFE91E63), // pink
+      'Одежда': const Color(0xFFE91E63), // pink
+      'salary': const Color(0xFF4CAF50), // green
+      'Зарплата': const Color(0xFF4CAF50), // green
+      'investments': const Color(0xFF009688), // teal
+      'Инвестиции': const Color(0xFF009688), // teal
+      'gifts': const Color(0xFFFFEB3B), // yellow
+      'Подарки': const Color(0xFFFFEB3B), // yellow
+      'cafe': const Color(0xFF795548), // brown
+      'Кафе': const Color(0xFF795548), // brown
+      'other': const Color(0xFF9E9E9E), // grey
+      'Другое': const Color(0xFF9E9E9E), // grey
+      'freelance': const Color(0xFF607D8B), // blue grey
+      'Фриланс': const Color(0xFF607D8B), // blue grey
+    };
+    
+    final color = categoryColors[categoryId] ?? categoryInfo.color;
+    
+    return Container(
+      width: 50,
+      height: 50,
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Center(
+        child: Text(
+          categoryInfo.emoji,
+          style: const TextStyle(
+            fontSize: 24,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTransactionItem(Transaction transaction, Category category) {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: ListTile(
         contentPadding: const EdgeInsets.all(16),
-        leading: Container(
-          width: 50,
-          height: 50,
-          decoration: BoxDecoration(
-            color: categoryInfo.color.withOpacity(0.2),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Center(
-            child: Text(
-              categoryInfo.emoji,
-              style: const TextStyle(
-                fontSize: 24,
-              ),
-            ),
-          ),
-        ),
+        leading: _getCategoryIcon(transaction.categoryId),
         title: Text(
           category.name,
           style: const TextStyle(

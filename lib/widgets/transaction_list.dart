@@ -92,10 +92,10 @@ class TransactionList extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Text(
-              '${transaction.type == TransactionType.expense ? '-' : '+'}${transaction.amount.toStringAsFixed(2)} ₽',
+              '${transaction.amount.toStringAsFixed(2)} ₽',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
-                color: transaction.type == TransactionType.income
+                color: transaction.amount >= 0
                     ? Colors.green
                     : Colors.red,
               ),

@@ -3,9 +3,17 @@ import 'package:finlife/screens/onboarding_screen.dart';
 import 'package:finlife/screens/home_screen.dart';
 import 'package:finlife/screens/survey_screen.dart';
 import 'package:finlife/screens/history_screen.dart';
+import 'package:finlife/screens/auth_screen.dart';
+import 'package:finlife/screens/achievements_screen.dart';
+import 'package:finlife/screens/statistics_screen.dart';
+import 'package:finlife/screens/goals_screen.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:finlife/providers/category_provider.dart';
+import 'package:finlife/services/storage_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:finlife/services/recurring_transaction_service.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 void main() {
   initializeDateFormatting('ru', null);
@@ -27,44 +35,76 @@ class FinLifeApp extends StatelessWidget {
         ),
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('ru', 'RU'),
+        Locale('en', 'US'),
+      ],
       home: const SplashScreen(),
       debugShowCheckedModeBanner: false,
       routes: {
         '/home': (context) => const HomeScreen(),
         '/survey': (context) => const SurveyScreen(),
         '/history': (context) => const HistoryScreen(),
+        '/achievements': (context) => const AchievementsScreen(),
+        '/statistics': (context) => const StatisticsScreen(),
+        '/goals': (context) => const GoalsScreen(),
       },
     );
   }
 }
 
-class SplashScreen extends StatefulWidget {
+class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
 
   @override
-  State<SplashScreen> createState() => _SplashScreenState();
+  ConsumerState<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> {
+class _SplashScreenState extends ConsumerState<SplashScreen> {
+  final StorageService _storageService = StorageService();
+
   @override
   void initState() {
     super.initState();
+    _checkAuthState();
+  }
+
+  Future<void> _checkAuthState() async {
     // Simulate loading time
-    Future.delayed(const Duration(seconds: 2), () {
-      // Check if user has completed onboarding
-      final bool hasCompletedOnboarding = false; // Replace with actual check
-      
-      if (mounted) {
+    await Future.delayed(const Duration(seconds: 2));
+    
+    final prefs = await SharedPreferences.getInstance();
+    final isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
+    final userName = prefs.getString('userName');
+    final isOnboardingComplete = await _storageService.isOnboardingComplete();
+    
+    if (mounted) {
+      if (isLoggedIn && userName != null) {
+        // Check for recurring transactions
+        final recurringService = RecurringTransactionService(ref);
+        await recurringService.checkAndAddRecurringTransactions('user_$userName');
+        
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(
-            builder: (context) => hasCompletedOnboarding
-                ? const HomeScreen()
-                : const OnboardingScreen(),
-          ),
+          MaterialPageRoute(builder: (context) => const HomeScreen()),
+        );
+      } else if (isOnboardingComplete) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const AuthScreen()),
+        );
+      } else {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const OnboardingScreen()),
         );
       }
-    });
+    }
   }
 
   @override

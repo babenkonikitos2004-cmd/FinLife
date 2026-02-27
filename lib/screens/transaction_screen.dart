@@ -1,20 +1,22 @@
 import 'package:flutter/material.dart';
-import 'package:finlife/models/transaction.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:finlife/models/transaction.dart' as model;
 import 'package:finlife/models/category.dart';
 import 'package:finlife/widgets/transaction_list.dart';
 import 'package:finlife/widgets/banner_widget.dart';
+import 'package:finlife/providers/transaction_provider.dart';
 
-class TransactionScreen extends StatefulWidget {
+class TransactionScreen extends ConsumerStatefulWidget {
   const TransactionScreen({super.key});
 
   @override
-  State<TransactionScreen> createState() => _TransactionScreenState();
+  ConsumerState<TransactionScreen> createState() => _TransactionScreenState();
 }
 
-class _TransactionScreenState extends State<TransactionScreen> {
-  late List<Transaction> transactions;
+class _TransactionScreenState extends ConsumerState<TransactionScreen> {
+  late List<model.Transaction> transactions;
   late List<Category> categories;
-  TransactionType selectedType = TransactionType.expense;
+  model.TransactionType selectedType = model.TransactionType.expense;
 
   @override
   void initState() {
@@ -26,28 +28,28 @@ class _TransactionScreenState extends State<TransactionScreen> {
   void _loadTransactions() {
     // Mock data for demonstration
     transactions = [
-      Transaction(
+      model.Transaction(
         id: '1',
         title: 'Покупка продуктов',
         amount: 1200.0,
         date: DateTime.now().subtract(const Duration(days: 1)),
-        type: TransactionType.expense,
+        type: model.TransactionType.expense,
         categoryId: '1',
       ),
-      Transaction(
+      model.Transaction(
         id: '2',
         title: 'Зарплата',
         amount: 50000.0,
         date: DateTime.now().subtract(const Duration(days: 5)),
-        type: TransactionType.income,
+        type: model.TransactionType.income,
         categoryId: '2',
       ),
-      Transaction(
+      model.Transaction(
         id: '3',
         title: 'Кофе',
         amount: 150.0,
         date: DateTime.now().subtract(const Duration(days: 2)),
-        type: TransactionType.expense,
+        type: model.TransactionType.expense,
         categoryId: '3',
       ),
     ];
@@ -91,92 +93,194 @@ class _TransactionScreenState extends State<TransactionScreen> {
     final titleController = TextEditingController();
     final amountController = TextEditingController();
     Category? selectedCategory;
+    bool isRecurring = false;
+    bool isCategoryInvalid = false;
 
     showDialog(
       context: context,
       builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Добавить транзакцию'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButton< TransactionType>(
-                  value: selectedType,
-                  items: TransactionType.values.map((type) {
-                    return DropdownMenuItem(
-                      value: type,
-                      child: Text(
-                        type == TransactionType.income ? 'Доход' : 'Расход',
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Добавить транзакцию'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButton<model.TransactionType>(
+                      value: selectedType,
+                      items: model.TransactionType.values.map((type) {
+                        return DropdownMenuItem(
+                          value: type,
+                          child: Text(
+                            type == model.TransactionType.income ? 'Доход' : 'Расход',
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        setState(() {
+                          selectedType = value as model.TransactionType;
+                          // Reset category when type changes
+                          selectedCategory = null;
+                          isCategoryInvalid = false;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: titleController,
+                      decoration: const InputDecoration(
+                        labelText: 'Название',
+                        border: OutlineInputBorder(),
                       ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: amountController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Сумма',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: isCategoryInvalid ? Colors.red : Colors.grey,
+                          width: isCategoryInvalid ? 2.0 : 1.0,
+                        ),
+                        borderRadius: BorderRadius.circular(4.0),
+                      ),
+                      child: DropdownButton<Category>(
+                        hint: const Text('Выберите категорию'),
+                        value: selectedCategory,
+                        items: categories
+                            .where((cat) => cat.type == selectedType)
+                            .map((category) {
+                          return DropdownMenuItem(
+                            value: category,
+                            child: Text(category.name),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() {
+                            selectedCategory = value;
+                            isCategoryInvalid = false;
+                          });
+                        },
+                        dropdownColor: isCategoryInvalid ? Colors.red[50] : null,
+                        isExpanded: true,
+                        underline: Container(),
+                      ),
+                    ),
+                    if (isCategoryInvalid)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 8.0),
+                        child: Text(
+                          'Выберите категорию',
+                          style: TextStyle(color: Colors.red, fontSize: 12),
+                        ),
+                      ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Switch(
+                          value: isRecurring,
+                          onChanged: (value) {
+                            setState(() {
+                              isRecurring = value;
+                            });
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Постоянная транзакция 🔄'),
+                              Text(
+                                'Будет повторяться каждый месяц',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Отмена'),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    // Validate category
+                    if (selectedCategory == null) {
+                      setState(() {
+                        isCategoryInvalid = true;
+                      });
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Выберите категорию')),
+                      );
+                      return;
+                    }
+                    
+                    if (amountController.text.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Введите сумму')),
+                      );
+                      return;
+                    }
+                    
+                    final amount = double.tryParse(amountController.text.replaceAll(',', '.'));
+                    if (amount == null || amount <= 0) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Введите корректную сумму')),
+                      );
+                      return;
+                    }
+
+                    final transaction = model.Transaction(
+                      id: DateTime.now().millisecondsSinceEpoch.toString(),
+                      title: titleController.text.isEmpty ? selectedCategory?.name ?? 'Транзакция' : titleController.text,
+                      amount: selectedType == model.TransactionType.expense ? -amount : amount,
+                      type: selectedType,
+                      categoryId: selectedCategory!.id,
+                      date: DateTime.now(),
+                      isRecurring: isRecurring,
                     );
-                  }).toList(),
-                  onChanged: (value) {
-                    setState(() {
-                      selectedType = value!;
-                    });
+
+                    try {
+                      await ref.read(transactionProvider.notifier).addTransaction(transaction);
+                      if (mounted) {
+                        Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Транзакция добавлена!'),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      }
+                    } catch (e) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Ошибка: $e'), backgroundColor: Colors.red),
+                        );
+                      }
+                    }
                   },
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: titleController,
-                  decoration: const InputDecoration(
-                    labelText: 'Название',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: amountController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Сумма',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                DropdownButton<Category>(
-                  hint: const Text('Выберите категорию'),
-                  value: selectedCategory,
-                  items: categories
-                      .where((cat) => cat.type == selectedType)
-                      .map((category) {
-                    return DropdownMenuItem(
-                      value: category,
-                      child: Text(category.name),
-                    );
-                  }).toList(),
-                  onChanged: (value) {
-                    setState(() {
-                      selectedCategory = value;
-                    });
-                  },
+                  child: const Text('Добавить'),
                 ),
               ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Отмена'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                if (titleController.text.isNotEmpty &&
-                    amountController.text.isNotEmpty &&
-                    selectedCategory != null) {
-                  // Add transaction logic here
-                  Navigator.of(context).pop();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Транзакция добавлена'),
-                    ),
-                  );
-                }
-              },
-              child: const Text('Добавить'),
-            ),
-          ],
+            );
+          },
         );
       },
     );
@@ -185,10 +289,10 @@ class _TransactionScreenState extends State<TransactionScreen> {
   @override
   Widget build(BuildContext context) {
     final incomeTransactions = transactions
-        .where((t) => t.type == TransactionType.income)
+        .where((t) => t.type == model.TransactionType.income)
         .toList();
     final expenseTransactions = transactions
-        .where((t) => t.type == TransactionType.expense)
+        .where((t) => t.type == model.TransactionType.expense)
         .toList();
 
     final totalIncome = incomeTransactions.fold(
@@ -296,35 +400,35 @@ class _TransactionScreenState extends State<TransactionScreen> {
               children: [
                 ChoiceChip(
                   label: const Text('Все'),
-                  selected: selectedType == TransactionType.income ||
-                      selectedType == TransactionType.expense,
+                  selected: selectedType == model.TransactionType.income ||
+                      selectedType == model.TransactionType.expense,
                   onSelected: (selected) {
                     setState(() {
-                      selectedType = TransactionType.income;
+                      selectedType = model.TransactionType.income;
                     });
                   },
                 ),
                 const SizedBox(width: 10),
                 ChoiceChip(
                   label: const Text('Доходы'),
-                  selected: selectedType == TransactionType.income,
+                  selected: selectedType == model.TransactionType.income,
                   onSelected: (selected) {
                     setState(() {
-                      selectedType = selectedType == TransactionType.income
-                          ? TransactionType.expense
-                          : TransactionType.income;
+                      selectedType = selectedType == model.TransactionType.income
+                          ? model.TransactionType.expense
+                          : model.TransactionType.income;
                     });
                   },
                 ),
                 const SizedBox(width: 10),
                 ChoiceChip(
                   label: const Text('Расходы'),
-                  selected: selectedType == TransactionType.expense,
+                  selected: selectedType == model.TransactionType.expense,
                   onSelected: (selected) {
                     setState(() {
-                      selectedType = selectedType == TransactionType.expense
-                          ? TransactionType.income
-                          : TransactionType.expense;
+                      selectedType = selectedType == model.TransactionType.expense
+                          ? model.TransactionType.income
+                          : model.TransactionType.expense;
                     });
                   },
                 ),
@@ -335,9 +439,9 @@ class _TransactionScreenState extends State<TransactionScreen> {
           // Transaction list
           Expanded(
             child: TransactionList(
-              transactions: selectedType == TransactionType.income
+              transactions: selectedType == model.TransactionType.income
                   ? incomeTransactions
-                  : selectedType == TransactionType.expense
+                  : selectedType == model.TransactionType.expense
                       ? expenseTransactions
                       : transactions,
               onTap: (transaction) {

@@ -5,9 +5,10 @@ import 'package:finlife/models/transaction.dart';
 import 'package:finlife/models/category.dart';
 import 'package:finlife/providers/transaction_provider.dart';
 import 'package:finlife/providers/category_provider.dart';
-import 'package:finlife/providers/user_provider.dart';
 import 'package:finlife/utils/calculations.dart';
 import 'package:finlife/utils/formatters.dart';
+import 'package:finlife/utils/category_utils.dart';
+import 'package:finlife/constants/app_colors.dart';
 
 class StatisticsScreen extends ConsumerStatefulWidget {
   const StatisticsScreen({super.key});
@@ -30,23 +31,6 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
     });
   }
 
-  void _showMonthPicker() async {
-    // Dismiss keyboard before showing date picker to avoid IME conflicts
-    FocusScope.of(context).unfocus();
-    
-    final DateTime? picked = await showDatePicker(
-      context: context,
-      initialDate: _selectedMonth,
-      firstDate: DateTime(2020),
-      lastDate: DateTime.now(),
-      initialEntryMode: DatePickerEntryMode.calendarOnly,
-    );
-
-    if (picked != null) {
-      _selectMonth(DateTime(picked.year, picked.month));
-    }
-  }
-
   List<Transaction> _getTransactionsForMonth(List<Transaction> transactions) {
     return transactions.where((transaction) {
       return transaction.date.year == _selectedMonth.year &&
@@ -54,35 +38,23 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
     }).toList();
   }
 
-  List<Transaction> _getTransactionsForWeek(
-      List<Transaction> transactions, int weekNumber) {
-    final firstDayOfMonth = DateTime(_selectedMonth.year, _selectedMonth.month, 1);
-    final firstDayOfWeek = firstDayOfMonth.add(Duration(days: (weekNumber - 1) * 7));
-    final lastDayOfWeek = firstDayOfWeek.add(const Duration(days: 6));
-
-    return transactions.where((transaction) {
-      return transaction.date.isAfter(firstDayOfWeek.subtract(const Duration(days: 1))) &&
-          transaction.date.isBefore(lastDayOfWeek.add(const Duration(days: 1)));
-    }).toList();
-  }
-
-  int _getWeeksInMonth(DateTime date) {
-    final daysInMonth = DateTime(date.year, date.month + 1, 0).day;
-    final firstDayOfMonth = DateTime(date.year, date.month, 1);
-    final firstWeekday = firstDayOfMonth.weekday;
+  List<Transaction> _getTransactionsForLastMonths(
+      List<Transaction> transactions, int months) {
+    final now = DateTime.now();
+    final startDate = DateTime(now.year, now.month - months + 1, 1);
     
-    // Calculate total weeks needed
-    final totalDays = firstWeekday - 1 + daysInMonth;
-    return (totalDays / 7).ceil();
+    return transactions.where((transaction) {
+      return transaction.date.isAfter(startDate) ||
+          transaction.date.isAtSameMomentAs(startDate);
+    }).toList();
   }
 
   @override
   Widget build(BuildContext context) {
     final transactionState = ref.watch(transactionProvider);
     final categoryState = ref.watch(categoryProvider);
-    final userState = ref.watch(userProvider);
 
-    if (transactionState.isLoading || categoryState.isLoading || userState.isLoading) {
+    if (transactionState.isLoading || categoryState.isLoading) {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),
       );
@@ -98,20 +70,15 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
 
     final totalIncome = Calculations.calculateIncome(transactions);
     final totalExpenses = Calculations.calculateExpenses(transactions);
-    final savings = totalIncome - totalExpenses;
+    final balance = totalIncome + totalExpenses; // Expenses are negative
     
     // Calculate savings percentage
-    final savingsPercentage = totalIncome > 0 ? (savings / totalIncome) : 0.0;
+    final savingsPercentage = totalIncome > 0 ? ((totalIncome + totalExpenses) / totalIncome) : 0.0;
     
-    // Get user's monthly income
-    final double monthlyIncome = userState.user?.monthlyIncome ?? 0.0;
-
     final expensesByCategory = Calculations.calculateExpensesByCategory(transactions);
     final sortedCategories = expensesByCategory.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
-    final top3Categories = sortedCategories.take(3).toList();
-
-    final weeksInMonth = _getWeeksInMonth(_selectedMonth);
+    final top5Categories = sortedCategories.take(5).toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -121,33 +88,28 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Month selector
-            _buildMonthSelector(),
+            // TOP SUMMARY CARDS
+            _buildSummaryCards(totalIncome, totalExpenses.abs(), balance),
             
             const SizedBox(height: 16),
             
-            // Savings progress card
-            _buildSavingsProgressCard(savings, savingsPercentage, monthlyIncome),
+            // SAVINGS RATE card
+            _buildSavingsRateCard(savingsPercentage),
             
             const SizedBox(height: 16),
             
-            // Summary cards
-            _buildSummaryCards(totalIncome, totalExpenses, savings),
-            
-            const SizedBox(height: 16),
-            
-            // Pie chart for expenses by category
+            // PIE CHART "Расходы по категориям"
             _buildPieChartSection(expenseTransactions, categoryState.categories),
             
             const SizedBox(height: 16),
             
-            // Bar chart for last 6 months income vs expenses
+            // BAR CHART "Доходы vs Расходы" last 6 months
             _buildMonthlyBarChartSection(transactionState.transactions),
             
             const SizedBox(height: 16),
             
-            // Top 3 categories with progress bars
-            _buildTopCategoriesSection(top3Categories, categoryState.categories, expensesByCategory),
+            // TOP SPENDING LIST
+            _buildTopSpendingList(top5Categories, categoryState.categories, expensesByCategory),
             
             const SizedBox(height: 16),
           ],
@@ -156,29 +118,114 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
     );
   }
 
-  Widget _buildMonthSelector() {
+  Widget _buildSummaryCards(double income, double expenses, double balance) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            '${_selectedMonth.month} ${_selectedMonth.year}',
-            style: const TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.income.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  const Text(
+                    'Доходы',
+                    style: TextStyle(
+                      color: AppColors.income,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Text(
+                    '${Formatters.formatCurrency(income)}',
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-          TextButton(
-            onPressed: _showMonthPicker,
-            child: const Text('Изменить'),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.expense.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  const Text(
+                    'Расходы',
+                    style: TextStyle(
+                      color: AppColors.expense,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Text(
+                    '${Formatters.formatCurrency(expenses)}',
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: (balance >= 0 
+                    ? AppColors.income 
+                    : AppColors.expense).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  const Text(
+                    'Баланс',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Text(
+                    '${Formatters.formatCurrency(balance)}',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: balance >= 0 ? AppColors.income : AppColors.expense,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildSavingsProgressCard(double savings, double savingsPercentage, double monthlyIncome) {
+  Widget _buildSavingsRateCard(double savingsPercentage) {
+    // Determine color based on savings percentage
+    Color circleColor;
+    if (savingsPercentage >= 0.2) {
+      circleColor = AppColors.income; // green
+    } else if (savingsPercentage >= 0.1) {
+      circleColor = Colors.orange; // yellow
+    } else {
+      circleColor = AppColors.expense; // red
+    }
+    
+    final percentageText = '${(savingsPercentage * 100).toStringAsFixed(1)}%';
+    
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Container(
@@ -196,138 +243,48 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
           ],
         ),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Накоплено в этом месяце',
+              'Вы сохраняете',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
               ),
             ),
             const SizedBox(height: 8),
-            Text(
-              '${Formatters.formatCurrency(savings)} ₽',
-              style: const TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: Colors.green,
-              ),
+            Stack(
+              alignment: Alignment.center,
+              children: [
+                SizedBox(
+                  width: 120,
+                  height: 120,
+                  child: CircularProgressIndicator(
+                    value: savingsPercentage > 1 ? 1 : savingsPercentage,
+                    strokeWidth: 10,
+                    backgroundColor: Colors.grey[300],
+                    valueColor: AlwaysStoppedAnimation<Color>(circleColor),
+                  ),
+                ),
+                Text(
+                  percentageText,
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 8),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: savingsPercentage > 0 ? savingsPercentage : 0,
-                valueColor: const AlwaysStoppedAnimation<Color>(Colors.green),
-                backgroundColor: Colors.grey[300]!,
-              ),
-            ),
-            const SizedBox(height: 4),
             Text(
-              '${Formatters.formatPercentage(savingsPercentage)} от дохода',
-              style: const TextStyle(
-                fontSize: 12,
-                color: Colors.grey,
+              'дохода',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: circleColor,
               ),
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildSummaryCards(double income, double expenses, double savings) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        children: [
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.green.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Column(
-                children: [
-                  const Text(
-                    'Доходы',
-                    style: TextStyle(
-                      color: Colors.green,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Text(
-                    '${Formatters.formatCurrency(income)} ₽',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Column(
-                children: [
-                  const Text(
-                    'Расходы',
-                    style: TextStyle(
-                      color: Colors.red,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Text(
-                    '${Formatters.formatCurrency(expenses)} ₽',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: savings >= 0 
-                    ? Colors.green.withOpacity(0.1) 
-                    : Colors.red.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Column(
-                children: [
-                  const Text(
-                    'Сбережения',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Text(
-                    '${Formatters.formatCurrency(savings)} ₽',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: savings >= 0 ? Colors.green : Colors.red,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -368,7 +325,7 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
       final entry = sortedCategories[i];
       final percentage = (entry.value / total) * 100;
       
-      // Find category name
+      // Find category
       final category = categories.firstWhere(
         (cat) => cat.id == entry.key,
         orElse: () => Category(
@@ -382,7 +339,7 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
       
       sections.add(
         PieChartSectionData(
-          color: _getColorForIndex(i),
+          color: Color(category.color),
           value: entry.value,
           title: '${percentage.toStringAsFixed(1)}%',
           radius: 50,
@@ -421,7 +378,6 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Container(
-        height: 250,
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
@@ -435,6 +391,7 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
           ],
         ),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Padding(
               padding: EdgeInsets.all(16),
@@ -446,7 +403,8 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
                 ),
               ),
             ),
-            Expanded(
+            SizedBox(
+              height: 200,
               child: PieChart(
                 PieChartData(
                   sections: sections,
@@ -458,37 +416,15 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
             ),
             // Legend
             Padding(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(16),
               child: Wrap(
-                alignment: WrapAlignment.center,
                 spacing: 8,
                 runSpacing: 4,
                 children: [
                   for (int i = 0; i < sortedCategories.length && i < 5; i++)
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 12,
-                          height: 12,
-                          color: _getColorForIndex(i),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          categories.firstWhere(
-                            (cat) => cat.id == sortedCategories[i].key,
-                            orElse: () => Category(
-                              id: sortedCategories[i].key,
-                              name: 'Неизвестно',
-                              type: CategoryType.expense,
-                              icon: '',
-                              color: 0xFF000000,
-                            ),
-                          ).name,
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                      ],
-                    ),
+                    _buildLegendItem(sortedCategories[i], categories, total, i),
+                  if (sortedCategories.length > 5)
+                    _buildLegendItemOther(sortedCategories, total),
                 ],
               ),
             ),
@@ -498,10 +434,74 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
     );
   }
 
+  Widget _buildLegendItem(MapEntry<String, double> entry, List<Category> categories, double total, int index) {
+    final category = categories.firstWhere(
+      (cat) => cat.id == entry.key,
+      orElse: () => Category(
+        id: entry.key,
+        name: 'Неизвестно',
+        type: CategoryType.expense,
+        icon: '',
+        color: 0xFF000000,
+      ),
+    );
+    
+    final categoryName = CategoryUtils.getCategoryInfo(category.name).name;
+    final percentage = (entry.value / total) * 100;
+    
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: Color(category.color),
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          '$categoryName ${percentage.toStringAsFixed(1)}% (${Formatters.formatCurrency(entry.value)})',
+          style: const TextStyle(fontSize: 12),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLegendItemOther(List<MapEntry<String, double>> sortedCategories, double total) {
+    double otherValue = 0;
+    for (int i = 5; i < sortedCategories.length; i++) {
+      otherValue += sortedCategories[i].value;
+    }
+    final otherPercentage = (otherValue / total) * 100;
+    
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: Colors.grey,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          'Другое ${otherPercentage.toStringAsFixed(1)}% (${Formatters.formatCurrency(otherValue)})',
+          style: const TextStyle(fontSize: 12),
+        ),
+      ],
+    );
+  }
+
   Widget _buildMonthlyBarChartSection(List<Transaction> allTransactions) {
     // Get last 6 months
     final List<BarChartGroupData> barGroups = [];
     final now = DateTime.now();
+    
+    double maxValue = 0;
     
     for (int i = 5; i >= 0; i--) {
       final month = DateTime(now.year, now.month - i, 1);
@@ -510,7 +510,11 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
       }).toList();
       
       final income = Calculations.calculateIncome(monthTransactions);
-      final expenses = Calculations.calculateExpenses(monthTransactions);
+      final expenses = Calculations.calculateExpenses(monthTransactions).abs();
+      
+      // Update max value for chart scaling
+      if (income > maxValue) maxValue = income;
+      if (expenses > maxValue) maxValue = expenses;
       
       barGroups.add(
         BarChartGroupData(
@@ -518,7 +522,7 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
           barRods: [
             BarChartRodData(
               toY: income,
-              color: Colors.green,
+              color: AppColors.income,
               width: 12,
               borderRadius: const BorderRadius.only(
                 topLeft: Radius.circular(4),
@@ -527,7 +531,7 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
             ),
             BarChartRodData(
               toY: expenses,
-              color: Colors.red,
+              color: AppColors.expense,
               width: 12,
               borderRadius: const BorderRadius.only(
                 topLeft: Radius.circular(4),
@@ -539,10 +543,12 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
       );
     }
     
+    // Add some padding to max value for better visualization
+    maxValue = maxValue * 1.2;
+    
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Container(
-        height: 250,
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
@@ -556,28 +562,24 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
           ],
         ),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Padding(
               padding: EdgeInsets.all(16),
               child: Text(
-                'Доходы и расходы за последние 6 месяцев',
+                'Доходы vs Расходы',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
                 ),
               ),
             ),
-            Expanded(
+            SizedBox(
+              height: 200,
               child: BarChart(
                 BarChartData(
                   alignment: BarChartAlignment.spaceAround,
-                  maxY: barGroups.isNotEmpty
-                      ? barGroups
-                          .expand((group) => group.barRods)
-                          .map((rod) => rod.toY)
-                          .reduce((a, b) => a > b ? a : b) *
-                          1.2
-                      : 1000,
+                  maxY: maxValue,
                   barTouchData: BarTouchData(
                     enabled: true,
                     touchTooltipData: BarTouchTooltipData(
@@ -600,7 +602,7 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
                           ),
                           children: <TextSpan>[
                             TextSpan(
-                              text: '${rod.toY.toStringAsFixed(2)} ₽',
+                              text: '${Formatters.formatShortCurrency(rod.toY)}',
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 14,
@@ -628,7 +630,7 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
                           return SideTitleWidget(
                             axisSide: meta.axisSide,
                             child: Text(
-                              monthName.substring(0, 3), // First 3 letters
+                              _getShortMonthName(month.month),
                               style: const TextStyle(
                                 fontSize: 10,
                                 fontWeight: FontWeight.bold,
@@ -646,7 +648,7 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
                           return SideTitleWidget(
                             axisSide: meta.axisSide,
                             child: Text(
-                              '${Formatters.formatCurrency(value)}',
+                              '${Formatters.formatShortCurrency(value)}',
                               style: const TextStyle(
                                 fontSize: 10,
                                 fontWeight: FontWeight.bold,
@@ -676,7 +678,7 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
             ),
             // Legend
             Padding(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(16),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -685,7 +687,7 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
                       Container(
                         width: 12,
                         height: 12,
-                        color: Colors.green,
+                        color: AppColors.income,
                       ),
                       const SizedBox(width: 4),
                       const Text(
@@ -700,7 +702,7 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
                       Container(
                         width: 12,
                         height: 12,
-                        color: Colors.red,
+                        color: AppColors.expense,
                       ),
                       const SizedBox(width: 4),
                       const Text(
@@ -718,211 +720,7 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
     );
   }
   
-  Widget _buildWeeklyBarChartSection(List<Transaction> transactions, int weeksInMonth) {
-    final List<BarChartGroupData> barGroups = [];
-    
-    for (int week = 1; week <= weeksInMonth; week++) {
-      final weekTransactions = _getTransactionsForWeek(transactions, week);
-      final income = Calculations.calculateIncome(weekTransactions);
-      final expenses = Calculations.calculateExpenses(weekTransactions);
-      
-      barGroups.add(
-        BarChartGroupData(
-          x: week,
-          barRods: [
-            BarChartRodData(
-              toY: income,
-              color: Colors.green,
-              width: 12,
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(4),
-                topRight: Radius.circular(4),
-              ),
-            ),
-            BarChartRodData(
-              toY: expenses,
-              color: Colors.red,
-              width: 12,
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(4),
-                topRight: Radius.circular(4),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Container(
-        height: 250,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.grey.withOpacity(0.1),
-              spreadRadius: 1,
-              blurRadius: 5,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
-        child: Column(
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                'Доходы и расходы по неделям',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            Expanded(
-              child: BarChart(
-                BarChartData(
-                  alignment: BarChartAlignment.spaceAround,
-                  maxY: barGroups.isNotEmpty
-                      ? barGroups
-                          .expand((group) => group.barRods)
-                          .map((rod) => rod.toY)
-                          .reduce((a, b) => a > b ? a : b) *
-                          1.2
-                      : 1000,
-                  barTouchData: BarTouchData(
-                    enabled: true,
-                    touchTooltipData: BarTouchTooltipData(
-                      getTooltipItem: (
-                        BarChartGroupData group,
-                        int groupIndex,
-                        BarChartRodData rod,
-                        int rodIndex,
-                      ) {
-                        return BarTooltipItem(
-                          'Неделя ${group.x}\n',
-                          const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                          ),
-                          children: <TextSpan>[
-                            TextSpan(
-                              text: '${rod.toY.toStringAsFixed(2)} ₽',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ],
-                        );
-                      },
-                      tooltipPadding: const EdgeInsets.all(4),
-                      tooltipMargin: 8,
-                    ),
-                  ),
-                  titlesData: FlTitlesData(
-                    show: true,
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 30,
-                        getTitlesWidget: (value, meta) {
-                          return SideTitleWidget(
-                            axisSide: meta.axisSide,
-                            child: Text(
-                              'Н${value.toInt()}',
-                              style: const TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    leftTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 40,
-                        getTitlesWidget: (value, meta) {
-                          return SideTitleWidget(
-                            axisSide: meta.axisSide,
-                            child: Text(
-                              '${Formatters.formatCurrency(value)}',
-                              style: const TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    topTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                    rightTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                  ),
-                  borderData: FlBorderData(
-                    show: true,
-                    border: Border.all(
-                      color: Colors.grey.withOpacity(0.2),
-                    ),
-                  ),
-                  barGroups: barGroups,
-                  gridData: const FlGridData(show: false),
-                ),
-              ),
-            ),
-            // Legend
-            Padding(
-              padding: const EdgeInsets.all(8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 12,
-                        height: 12,
-                        color: Colors.green,
-                      ),
-                      const SizedBox(width: 4),
-                      const Text(
-                        'Доходы',
-                        style: TextStyle(fontSize: 12),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(width: 16),
-                  Row(
-                    children: [
-                      Container(
-                        width: 12,
-                        height: 12,
-                        color: Colors.red,
-                      ),
-                      const SizedBox(width: 4),
-                      const Text(
-                        'Расходы',
-                        style: TextStyle(fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTopCategoriesSection(
+  Widget _buildTopSpendingList(
     List<MapEntry<String, double>> topCategories,
     List<Category> allCategories,
     Map<String, double> expensesByCategory,
@@ -931,11 +729,9 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
       return const SizedBox();
     }
 
-    // Calculate max value for progress bars
-    final maxValue = topCategories.isNotEmpty
-        ? topCategories.map((e) => e.value).reduce((a, b) => a > b ? a : b)
-        : 1.0;
-
+    // Calculate total expenses for percentage calculation
+    final totalExpenses = expensesByCategory.values.fold(0.0, (sum, value) => sum + value);
+    
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Container(
@@ -969,10 +765,10 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
               child: Column(
                 children: [
                   for (int i = 0; i < topCategories.length; i++)
-                    _buildCategoryProgressItem(
+                    _buildSpendingItem(
                       topCategories[i],
                       allCategories,
-                      maxValue,
+                      totalExpenses,
                       i,
                     ),
                 ],
@@ -985,10 +781,10 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
     );
   }
 
-  Widget _buildCategoryProgressItem(
+  Widget _buildSpendingItem(
     MapEntry<String, double> categoryEntry,
     List<Category> allCategories,
-    double maxValue,
+    double totalExpenses,
     int index,
   ) {
     final category = allCategories.firstWhere(
@@ -1001,6 +797,9 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
         color: 0xFF000000,
       ),
     );
+    
+    final categoryName = CategoryUtils.getCategoryInfo(category.name).name;
+    final percentage = totalExpenses > 0 ? (categoryEntry.value / totalExpenses) * 100 : 0;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -1010,23 +809,55 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                category.name,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                ),
+              Row(
+                children: [
+                  Container(
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      color: Color(category.color),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    categoryName,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
               ),
-              Text('${Formatters.formatCurrency(categoryEntry.value)} ₽'),
+              Text('${Formatters.formatCurrency(categoryEntry.value)}'),
             ],
           ),
           const SizedBox(height: 4),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: categoryEntry.value / maxValue,
-              valueColor: AlwaysStoppedAnimation<Color>(_getColorForIndex(index)),
-              backgroundColor: Colors.grey[300]!,
-            ),
+          Row(
+            children: [
+              Expanded(
+                flex: 4,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: percentage / 100,
+                    valueColor: AlwaysStoppedAnimation<Color>(Color(category.color)),
+                    backgroundColor: Colors.grey[300]!,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 1,
+                child: Text(
+                  '${percentage.toStringAsFixed(0)}%',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey,
+                  ),
+                  textAlign: TextAlign.right,
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -1051,17 +882,21 @@ class _StatisticsScreenState extends ConsumerState<StatisticsScreen> {
     return months[month - 1];
   }
   
-  Color _getColorForIndex(int index) {
-    final List<Color> colors = [
-      Colors.blue,
-      Colors.green,
-      Colors.orange,
-      Colors.purple,
-      Colors.red,
-      Colors.teal,
-      Colors.pink,
-      Colors.indigo,
+  String _getShortMonthName(int month) {
+    const months = [
+      'Янв',
+      'Фев',
+      'Мар',
+      'Апр',
+      'Май',
+      'Июн',
+      'Июл',
+      'Авг',
+      'Сен',
+      'Окт',
+      'Ноя',
+      'Дек',
     ];
-    return colors[index % colors.length];
+    return months[month - 1];
   }
 }

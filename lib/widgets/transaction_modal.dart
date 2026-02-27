@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:finlife/models/transaction.dart';
 import 'package:finlife/models/category.dart';
 import 'package:finlife/providers/transaction_provider.dart';
-import 'package:finlife/providers/user_provider.dart';
 import 'package:intl/intl.dart';
 
 class TransactionModal extends ConsumerStatefulWidget {
@@ -175,18 +174,10 @@ class _TransactionModalState extends ConsumerState<TransactionModal> {
       return;
     }
 
-    final userState = ref.read(userProvider);
-    if (userState.user == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Ошибка: пользователь не найден')),
-      );
-      return;
-    }
-
     final transaction = Transaction(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       title: _noteController.text.isEmpty ? 'Транзакция' : _noteController.text,
-      amount: amount,
+      amount: _transactionType == TransactionType.expense ? -amount : amount,
       date: _selectedDate,
       type: _transactionType,
       categoryId: _selectedCategoryId!,

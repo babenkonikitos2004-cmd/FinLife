@@ -125,6 +125,7 @@ class AppDatabase extends _$AppDatabase {
   Future<int> insertUser(Insertable<User> user) => into(users).insert(user);
   Future<bool> updateUser(Insertable<User> user) => update(users).replace(user);
   Future<int> deleteUser(String id) => (delete(users)..where((u) => u.id.equals(id))).go();
+  Future<int> deleteAllUsers() => delete(users).go();
 
   // Category methods
   Future<List<Category>> getCategories() => select(categories).get();
@@ -139,6 +140,7 @@ class AppDatabase extends _$AppDatabase {
   Future<int> insertTransaction(Insertable<Transaction> transaction) => into(transactions).insert(transaction);
   Future<bool> updateTransaction(Insertable<Transaction> transaction) => update(transactions).replace(transaction);
   Future<int> deleteTransaction(String id) => (delete(transactions)..where((t) => t.id.equals(id))).go();
+  Future<int> deleteTransactionsByUser(String userId) => (delete(transactions)..where((t) => t.userId.equals(userId))).go();
 
   // Budget methods
   Future<List<Budget>> getBudgets() => select(budgets).get();
@@ -148,6 +150,7 @@ class AppDatabase extends _$AppDatabase {
   Future<int> insertBudget(Insertable<Budget> budget) => into(budgets).insert(budget);
   Future<bool> updateBudget(Insertable<Budget> budget) => update(budgets).replace(budget);
   Future<int> deleteBudget(String id) => (delete(budgets)..where((b) => b.id.equals(id))).go();
+  Future<int> deleteBudgetsByUser(String userId) => (delete(budgets)..where((b) => b.userId.equals(userId))).go();
 
   // FinancialGoal methods
   Future<List<FinancialGoal>> getFinancialGoals() => select(financialGoals).get();
@@ -157,11 +160,13 @@ class AppDatabase extends _$AppDatabase {
   Future<int> insertFinancialGoal(Insertable<FinancialGoal> goal) => into(financialGoals).insert(goal);
   Future<bool> updateFinancialGoal(Insertable<FinancialGoal> goal) => update(financialGoals).replace(goal);
   Future<int> deleteFinancialGoal(String id) => (delete(financialGoals)..where((g) => g.id.equals(id))).go();
+  Future<int> deleteFinancialGoalsByUser(String userId) => (delete(financialGoals)..where((g) => g.userId.equals(userId))).go();
 
   // Gamification methods
   Future<GamificationData> getGamification(String userId) => (select(gamification)..where((g) => g.userId.equals(userId))).getSingle();
   Future<int> insertGamification(Insertable<GamificationData> gamification) => into(this.gamification).insert(gamification);
   Future<bool> updateGamification(Insertable<GamificationData> gamification) => update(this.gamification).replace(gamification);
+  Future<int> deleteGamificationByUser(String userId) => (delete(this.gamification)..where((g) => g.userId.equals(userId))).go();
 }
 
 LazyDatabase _openConnection() {

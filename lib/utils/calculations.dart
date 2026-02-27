@@ -34,7 +34,13 @@ class Calculations {
       }
     }
     
-    return expensesByCategory;
+    // Convert negative amounts to positive for display purposes
+    final Map<String, double> positiveExpensesByCategory = {};
+    expensesByCategory.forEach((key, value) {
+      positiveExpensesByCategory[key] = value.abs();
+    });
+    
+    return positiveExpensesByCategory;
   }
   
   static double calculateBudgetProgress(
@@ -48,7 +54,7 @@ class Calculations {
     final spent = budgetTransactions.fold(
         0.0, (sum, transaction) => sum + transaction.amount);
     
-    return spent / budget.amount;
+    return spent.abs() / budget.amount; // Use absolute value since expenses are negative
   }
   
   static double calculateSavingsRate(
@@ -62,6 +68,6 @@ class Calculations {
     
     if (income == 0) return 0;
     
-    return (income - expenses) / income;
+    return (income + expenses) / income; // Expenses are already negative
   }
 }

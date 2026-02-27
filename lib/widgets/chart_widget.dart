@@ -74,10 +74,11 @@ class ChartWidget extends StatelessWidget {
     return BarChart(
       BarChartData(
         alignment: BarChartAlignment.spaceAround,
-        maxY: (monthlyData.values.fold(0.0, (a, b) => a > b ? a : b)) * 1.2,
+        maxY: (monthlyData.values.fold(0.0, (a, b) => a > b ? a : b) * 1.2).toDouble(),
         barTouchData: BarTouchData(
           enabled: true,
           touchTooltipData: BarTouchTooltipData(
+            getTooltipColor: (group) => Colors.blueGrey,
             getTooltipItem: (
               BarChartGroupData group,
               int groupIndex,
@@ -101,8 +102,6 @@ class ChartWidget extends StatelessWidget {
                 ],
               );
             },
-            tooltipPadding: const EdgeInsets.all(4),
-            tooltipMargin: 8,
           ),
         ),
         titlesData: FlTitlesData(

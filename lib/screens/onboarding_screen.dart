@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:finlife/screens/auth_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -28,6 +30,18 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       'image': 'assets/images/onboarding3.png',
     },
   ];
+
+  Future<void> _completeOnboarding() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('hasCompletedOnboarding', true);
+    
+    if (mounted) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const AuthScreen()),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -59,8 +73,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             child: ElevatedButton(
               onPressed: () {
                 if (_currentPage == _onboardingPages.length - 1) {
-                  // Navigate to survey setup
-                  Navigator.pushReplacementNamed(context, '/survey');
+                  // Complete onboarding and navigate to auth
+                  _completeOnboarding();
                 } else {
                   _pageController.nextPage(
                     duration: const Duration(milliseconds: 300),

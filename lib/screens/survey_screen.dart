@@ -4,6 +4,7 @@ import 'package:finlife/providers/user_provider.dart';
 import 'package:finlife/providers/transaction_provider.dart';
 import 'package:finlife/models/user.dart' as model;
 import 'package:finlife/screens/home_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class SurveyScreen extends ConsumerStatefulWidget {
   const SurveyScreen({super.key});
@@ -60,7 +61,7 @@ class _SurveyScreenState extends ConsumerState<SurveyScreen>
     }
   }
 
-  void _saveUserData() {
+  Future<void> _saveUserData() async {
     print('DEBUG: _saveUserData called');
     final userState = ref.read(userProvider);
     print('DEBUG: userState loaded, user is null: ${userState.user == null}');
@@ -86,6 +87,11 @@ class _SurveyScreenState extends ConsumerState<SurveyScreen>
       print('DEBUG: Creating new user');
       ref.read(userProvider.notifier).createUser(newUser);
     }
+    
+    // Save user ID to SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('user_id', newUser.id);
+    print('DEBUG: Saved user_id: ${newUser.id}');
     
     // Load transactions for the new user
     print('DEBUG: Loading transactions for new user');
