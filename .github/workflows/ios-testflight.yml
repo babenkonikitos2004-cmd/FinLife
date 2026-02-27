@@ -28,32 +28,3 @@ jobs:
         with:
           name: ios-ipa
           path: app.ipa
-```
-
-После пуша → Actions → скачиваешь `app.ipa`
-
----
-
-## Шаг 2: Установи .ipa на iPhone
-
-### Вариант А — AltStore (лучший)
-1. Скачай **AltServer** на Windows — [altstore.io](https://altstore.io)
-2. Подключи iPhone по USB
-3. Установи AltStore на телефон через AltServer
-4. Через AltStore установи свой `.ipa`
-
-⚠️ Приложение нужно **обновлять каждые 7 дней** (бесплатный Apple ID)
-
-### Вариант Б — Sideloadly
-1. Скачай **Sideloadly** — [sideloadly.io](https://sideloadly.io)
-2. Подключи iPhone по USB
-3. Перетащи `.ipa` → введи Apple ID → Install
-
-Тоже 7 дней, потом переустановить.
-
----
-
-## Итого
-```
-Пишешь код → push на GitHub → Actions собирает .ipa
-→ Sideloadly устанавливает на iPhone → готово
