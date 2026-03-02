@@ -23,7 +23,7 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   int _selectedIndex = 0;
-  DateTime _currentMonth = DateTime(2026, 2); // February 2026 as per design
+  DateTime _currentMonth = DateTime(DateTime.now().year, DateTime.now().month);
 
   @override
   void initState() {

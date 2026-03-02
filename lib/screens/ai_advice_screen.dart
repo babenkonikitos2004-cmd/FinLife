@@ -19,6 +19,43 @@ class _AIAdviceScreenState extends ConsumerState<AIAdviceScreen> {
   List<Map<String, String>> _aiAdvice = [];
   bool _isLoadingAi = false;
   String? _aiError;
+  String? _lastSavedDate;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedAdvice();
+  }
+
+  Future<void> _loadSavedAdvice() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getString('ai_advice_cache');
+      final savedDate = prefs.getString('ai_advice_date');
+      if (saved != null) {
+        final list = (jsonDecode(saved) as List).map((a) => {
+          'title': a['title'].toString(),
+          'text': a['text'].toString(),
+          'type': a['type'].toString(),
+        }).toList();
+        setState(() {
+          _aiAdvice = list;
+          _lastSavedDate = savedDate;
+        });
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  Future<void> _saveAdvice(List<Map<String, String>> advice) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('ai_advice_cache', jsonEncode(advice));
+    final now = DateTime.now();
+    final dateStr = '${now.day}.${now.month}.${now.year} ${now.hour}:${now.minute.toString().padLeft(2, '0')}';
+    await prefs.setString('ai_advice_date', dateStr);
+    setState(() => _lastSavedDate = dateStr);
+  }
 
   static const _categoryNames = {
     'food': 'Еда',
@@ -101,7 +138,7 @@ class _AIAdviceScreenState extends ConsumerState<AIAdviceScreen> {
       ).timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
         final content = data['choices'][0]['message']['content'] as String;
         final cleanJson = content
             .replaceAll('```json', '')
@@ -109,12 +146,14 @@ class _AIAdviceScreenState extends ConsumerState<AIAdviceScreen> {
             .trim();
         final parsed = jsonDecode(cleanJson);
         final adviceList = parsed['advice'] as List;
+        final newAdvice = adviceList.map((a) => {
+          'title': a['title'].toString(),
+          'text': a['text'].toString(),
+          'type': a['type'].toString(),
+        }).toList();
+        await _saveAdvice(newAdvice);
         setState(() {
-          _aiAdvice = adviceList.map((a) => {
-            'title': a['title'].toString(),
-            'text': a['text'].toString(),
-            'type': a['type'].toString(),
-          }).toList();
+          _aiAdvice = newAdvice;
           _isLoadingAi = false;
         });
       } else if (response.statusCode == 401) {
@@ -311,8 +350,9 @@ class _AIAdviceScreenState extends ConsumerState<AIAdviceScreen> {
                             child: _isLoadingAi
                                 ? const SizedBox(height: 20, width: 20,
                                     child: CircularProgressIndicator(strokeWidth: 2))
-                                : const Text('✨ Спросить ИИ',
-                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                : Text(
+                                    _aiAdvice.isEmpty ? '✨ Спросить ИИ' : '🔄 Обновить советы',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                           ),
                         ),
                       ],
@@ -347,6 +387,10 @@ class _AIAdviceScreenState extends ConsumerState<AIAdviceScreen> {
                         const Text('💬 Советы от ИИ',
                             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                         const Spacer(),
+                        if (_lastSavedDate != null)
+                          Text(_lastSavedDate!,
+                              style: TextStyle(color: Colors.grey[500], fontSize: 11)),
+                        const SizedBox(width: 8),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
